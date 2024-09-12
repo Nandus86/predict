@@ -1,7 +1,7 @@
 version: '3'
 services:
   api:
-    image: nandus86/predict:tagname
+    image: nandus86/predict:latest
     build:
       context: .
       dockerfile: Dockerfile
