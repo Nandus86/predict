@@ -12,7 +12,7 @@ class InputData(BaseModel):
     no_auto_detect: bool
     agree: bool
     fn_index: int
-    usar_mic: str
+    usar_mic: bool
 
 app = FastAPI()
 
@@ -20,28 +20,27 @@ app = FastAPI()
 def predict(data: InputData):
     # Cria o cliente Gradio
     client = Client("https://coquitts.nandus.com.br/")
-
-    # Executa a predição usando os dados da requisição
+    
     try:
-        # Especifique o `fn_index` e os argumentos conforme esperado pela API Gradio
+        # Chama o método predict da API Gradio passando os parâmetros diretamente
         result = client.predict(
-            api_name=None,  # Se necessário, ajuste para o nome do endpoint
-            fn_index=data.fn_index,  # Índice da função
-            inputs=(
-                data.text_prompt,  # str
-                data.language,  # str
-                data.audio_reference,  # str
-                data.use_microphone,  # str
-                data.clean_voice,  # bool
-                data.no_auto_detect,  # bool
-                data.agree,  # bool
-                data.usar_mic  # str
-            )
+            data.text_prompt,         # str
+            data.language,            # str
+            data.audio_reference,    # str
+            data.use_microphone,     # str
+            data.clean_voice,        # bool
+            data.no_auto_detect,     # bool
+            data.agree,              # bool
+            data.fn_index,           # int
+            data.usar_mic            # bool
         )
         return {"result": result}
+    except ValueError as e:
+        # Captura erros específicos relacionados a parâmetros
+        raise HTTPException(status_code=400, detail=f"ValueError: {e}")
     except Exception as e:
-        # Captura e retorna qualquer erro
-        raise HTTPException(status_code=500, detail=str(e))
+        # Captura outros erros
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
 
 if __name__ == "__main__":
     import uvicorn
