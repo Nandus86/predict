@@ -1,0 +1,21 @@
+version: '3'
+services:
+  api:
+    image: api-coquitts:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-coquitts
+    restart: always
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.nandus.com.br`) && PathPrefix(`/predict`)"
+      - "traefik.http.services.api.loadbalancer.server.port=7000"
+    expose:
+      - "7000"
+
+networks:
+  web:
+    external: true
