@@ -29,7 +29,7 @@ def predict(data: InputData):
             data.clean_voice,  # bool in 'Limpar Voz de Referência'
             data.no_auto_detect,  # bool in 'Não usar detecção automática de idioma'
             data.agree,  # bool in 'Concordo'
-            data.fn_index=1  # Garanta que fn_index esteja correto
+            data.fn_index==1  # Garanta que fn_index esteja correto
         )
         return {"result": result}
     except ValueError as e:
