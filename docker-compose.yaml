@@ -8,7 +8,7 @@ services:
     container_name: api-coquitts
     restart: always
     networks:
-      - web
+      - predict
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.nandus.com.br`) && PathPrefix(`/predict`)"
@@ -17,5 +17,5 @@ services:
       - "7010"
 
 networks:
-  web:
+  predict:
     external: true
