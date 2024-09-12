@@ -1,44 +1,36 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 from gradio_client import Client
 
-# Define o modelo de entrada para o FastAPI
 class InputData(BaseModel):
     text_prompt: str
     language: str
     audio_reference: str
     use_microphone: str
-    usar_mic: bool
     clean_voice: bool
     no_auto_detect: bool
     agree: bool
     fn_index: int
+    usar_mic: str  # Adicionando parâmetro adicional
 
 app = FastAPI()
 
 @app.post("/predict")
 def predict(data: InputData):
-    # Cria o cliente Gradio
     client = Client("https://coquitts.nandus.com.br/")
     
-    try:
-        # Executa a predição usando os dados da requisição
-        result = client.predict(
-            data.text_prompt,  # str  in 'Texto do Prompt'
-            data.language,  # str in 'Idioma'
-            data.audio_reference,  # str in 'Áudio de Referência'
-            data.use_microphone,  # str in 'Use microfone para referência'
-            data.usar_mic,
-            data.clean_voice,  # bool in 'Limpar Voz de Referência'
-            data.no_auto_detect,  # bool in 'Não usar detecção automática de idioma'
-            data.agree,  # bool in 'Concordo'
-            fn_index=data.fn_index  # Garanta que fn_index esteja correto
-        )
-        return {"result": result}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"ValueError: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+    # Ajuste a chamada conforme os parâmetros esperados
+    result = client.predict(
+        (data.text_prompt, data.language),  # Supondo que a API espera um tuplo
+        (data.audio_reference, data.use_microphone),
+        data.clean_voice,
+        data.no_auto_detect,
+        data.agree,
+        data.fn_index,
+        data.usar_mic
+    )
+    
+    return {"result": result}
 
 if __name__ == "__main__":
     import uvicorn
