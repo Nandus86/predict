@@ -8,6 +8,7 @@ class InputData(BaseModel):
     language: str
     audio_reference: str
     use_microphone: str
+    usar_mic: bool
     clean_voice: bool
     no_auto_detect: bool
     agree: bool
@@ -27,6 +28,7 @@ def predict(data: InputData):
             data.language,  # str in 'Idioma'
             data.audio_reference,  # str in 'Áudio de Referência'
             data.use_microphone,  # str in 'Use microfone para referência'
+            data.usar_mic,
             data.clean_voice,  # bool in 'Limpar Voz de Referência'
             data.no_auto_detect,  # bool in 'Não usar detecção automática de idioma'
             data.agree,  # bool in 'Concordo'
