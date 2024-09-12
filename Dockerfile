@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY coquitts.py .
 
 # Expor a porta 7000
-EXPOSE 7000
+EXPOSE 7010
 
 # Comando para rodar o FastAPI
-CMD ["uvicorn", "coquitts:app", "--host", "0.0.0.0", "--port", "7000"]
+CMD ["uvicorn", "coquitts:app", "--host", "0.0.0.0", "--port", "7010"]
