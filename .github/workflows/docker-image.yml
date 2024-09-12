@@ -12,7 +12,7 @@ jobs:
     steps:
       # Puxa o repositório
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       # Faz login no Docker Hub
       - name: Log in to Docker Hub
