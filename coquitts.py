@@ -3,44 +3,44 @@ from pydantic import BaseModel
 from gradio_client import Client
 
 # Define o modelo de entrada para o FastAPI
-class InputData(BaseModel):
-    text_prompt: str
-    language: str
-    audio_reference: str
-    use_microphone: str
-    clean_voice: bool
-    no_auto_detect: bool
-    agree: bool
-    fn_index: int
+class DadosEntrada(BaseModel):
+    texto_prompt: str
+    idioma: str
+    audio_referencia: str
+    usar_microfone: str
+    limpar_voz: bool
+    nao_detectar_auto: bool
+    concordo: bool
+    indice_funcao: int
     usar_mic: bool
 
 app = FastAPI()
 
-@app.post("/predict")
-def predict(data: InputData):
-    # Cria o cliente Gradio
-    client = Client("https://coquitts.nandus.com.br/")
-    
+# Cria o cliente Gradio uma vez, fora da função
+cliente = Client("https://coquitts.nandus.com.br/")
+
+@app.post("/prever")
+async def prever(dados: DadosEntrada):
     try:
         # Chama o método predict da API Gradio passando os parâmetros diretamente
-        result = client.predict(
-            data.text_prompt,         # str
-            data.language,            # str
-            data.audio_reference,    # str
-            data.use_microphone,     # str
-            data.clean_voice,        # bool
-            data.no_auto_detect,     # bool
-            data.agree,              # bool
-            data.fn_index,           # int
-            data.usar_mic            # bool
+        resultado = cliente.predict(
+            dados.texto_prompt,
+            dados.idioma,
+            dados.audio_referencia,
+            dados.usar_microfone,
+            dados.usar_mic,  # Nota: Alterado a ordem para corresponder ao exemplo anterior
+            dados.limpar_voz,
+            dados.nao_detectar_auto,
+            dados.concordo,
+            fn_index=dados.indice_funcao
         )
-        return {"result": result}
+        return {"resultado": resultado}
     except ValueError as e:
         # Captura erros específicos relacionados a parâmetros
-        raise HTTPException(status_code=400, detail=f"ValueError: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # Captura outros erros
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
