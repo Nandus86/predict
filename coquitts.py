@@ -11,6 +11,7 @@ class InputData(BaseModel):
     clean_voice: bool
     no_auto_detect: bool
     agree: bool
+    fn_index: int
 
 app = FastAPI()
 
@@ -28,7 +29,7 @@ def predict(data: InputData):
         data.clean_voice,  # bool in 'Limpar Voz de Referência'
         data.no_auto_detect,  # bool in 'Não usar detecção automática de idioma'
         data.agree,  # bool in 'Concordo'
-        fn_index=1
+        data.fn_index
     )
     
     return {"result": result}
