@@ -20,7 +20,6 @@ def predict(data: InputData):
     client = Client("https://coquitts.nandus.com.br/")
     
     try:
-        # Substitua '1' pelo fn_index correto
         result = client.predict(
             api_name=None,  # Ou o nome do endpoint se necessário
             fn_index=data.fn_index,  # Índice da função
