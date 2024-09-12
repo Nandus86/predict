@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from gradio_client import Client
 
+# Define o modelo de entrada para o FastAPI
 class InputData(BaseModel):
     text_prompt: str
     language: str
@@ -17,17 +18,29 @@ app = FastAPI()
 
 @app.post("/predict")
 def predict(data: InputData):
+    # Cria o cliente Gradio
     client = Client("https://coquitts.nandus.com.br/")
-    
+
+    # Executa a predição usando os dados da requisição
     try:
+        # Especifique o `fn_index` e os argumentos conforme esperado pela API Gradio
         result = client.predict(
-            api_name=None,  # Ou o nome do endpoint se necessário
+            api_name=None,  # Se necessário, ajuste para o nome do endpoint
             fn_index=data.fn_index,  # Índice da função
-            inputs=[data.text_prompt, data.language, data.audio_reference, data.use_microphone, data.clean_voice, data.no_auto_detect, data.agree, data.usar_mic]
+            inputs=(
+                data.text_prompt,  # str
+                data.language,  # str
+                data.audio_reference,  # str
+                data.use_microphone,  # str
+                data.clean_voice,  # bool
+                data.no_auto_detect,  # bool
+                data.agree,  # bool
+                data.usar_mic  # str
+            )
         )
         return {"result": result}
     except Exception as e:
-        print(f"Error: {e}")
+        # Captura e retorna qualquer erro
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
