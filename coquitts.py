@@ -1,8 +1,9 @@
-import os
-import shutil
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from gradio_client import Client
+import os
+import shutil
 
 app = FastAPI()
 
@@ -22,7 +23,6 @@ class PredictRequest(BaseModel):
 @app.post("/predict")
 async def predict(request_data: PredictRequest):
     try:
-        # Chama o Gradio Client para fazer a predição
         result = client.predict(
             request_data.text_prompt,
             request_data.language,
@@ -35,21 +35,35 @@ async def predict(request_data: PredictRequest):
             fn_index=request_data.fn_index
         )
 
-        # Filtra o arquivo .wav do resultado
         wav_file_path = [r for r in result if r.endswith('.wav')][0]
-
-        # Define o diretório de destino para o arquivo final
         final_directory = "/app/final_audio/"
         os.makedirs(final_directory, exist_ok=True)
-
-        # Move o arquivo .wav para o diretório final e apaga temporários
         final_wav_path = shutil.move(wav_file_path, final_directory)
         temp_dir = os.path.dirname(wav_file_path)
-        shutil.rmtree(temp_dir)  # Apaga o diretório temporário
+        shutil.rmtree(temp_dir)  # Apaga diretórios temporários
 
         return {"result": final_wav_path}
     except Exception as e:
         return {"error": str(e)}
+
+# Rota para servir os arquivos .wav
+@app.get("/audio/{file_name}")
+async def get_audio(file_name: str):
+    file_path = f"/app/final_audio/{file_name}"
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type='audio/wav')
+    else:
+        return {"error": "Arquivo não encontrado"}
+
+# Rota para apagar arquivos .wav
+@app.delete("/audio/{file_name}")
+async def delete_audio(file_name: str):
+    file_path = f"/app/final_audio/{file_name}"
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        return {"message": f"Arquivo {file_name} foi apagado com sucesso."}
+    else:
+        return {"error": "Arquivo não encontrado"}
 
 if __name__ == "__main__":
     import uvicorn
