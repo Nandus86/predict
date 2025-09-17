@@ -10,3 +10,4 @@ parler-tts
 transformers
 soundfile
 librosa
+python-multipart
