@@ -3,5 +3,10 @@ uvicorn
 gradio_client
 pydantic
 openai-whisper
-requests aiofiles ffmpeg-python
-parler-tts transformers soundfile librosa
+requests
+aiofiles
+ffmpeg-python
+parler-tts
+transformers
+soundfile
+librosa
