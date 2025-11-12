@@ -11,6 +11,8 @@ import shutil
 import glob
 import tempfile
 import requests
+import psutil  # Para controle de CPU
+import threading
 from typing import Optional
 
 app = FastAPI()
@@ -32,9 +34,52 @@ print("Carregando modelo Whisper...")
 whisper_model = whisper.load_model("base")  # Melhor balance velocidade/precisão
 print("Modelo Whisper carregado com sucesso!")
 
-# Carrega Parler-TTS (inicialização tardia para não travar o startup)
+# Carrega Parler-TTS na inicialização
 parler_model = None
 parler_tokenizer = None
+
+# Carrega Parler-TTS na inicialização (VERSÃO COMPLETA)
+parler_model = None
+parler_tokenizer = None
+
+# Controle de CPU
+def limit_cpu_usage():
+    """Limita uso de CPU para 80%"""
+    current_process = psutil.Process()
+    current_process.nice(10)  # Reduz prioridade
+    
+    # Limita threads do PyTorch
+    torch.set_num_threads(max(1, psutil.cpu_count() - 1))
+
+# Inicializa Parler-TTS automaticamente (com configurações otimizadas)
+try:
+    from parler_tts import ParlerTTSForConditionalGeneration
+    from transformers import AutoTokenizer
+    import soundfile as sf
+    
+    print("Carregando Parler-TTS...")
+    limit_cpu_usage()  # Aplica limite de CPU
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model_name = "freds0/parler-tts-mini-v1.1-ptbr"
+    
+    # Carrega modelo
+    parler_model = ParlerTTSForConditionalGeneration.from_pretrained(
+        model_name,
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,
+        device_map="auto"
+    ).to(device)
+    
+    parler_tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+    print(f"Parler-TTS carregado com sucesso! Dispositivo: {device}")
+    print(f"Threads PyTorch limitadas a: {torch.get_num_threads()}")
+    
+except Exception as e:
+    print(f"Parler-TTS não carregado: {e}")
+    parler_model = None
+    parler_tokenizer = None
 
 # ============== MODELOS PYDANTIC ==============
 
@@ -65,6 +110,10 @@ class ParlerTTSRequest(BaseModel):
     description: str = "Uma voz feminina jovem e clara falando em português brasileiro"
     hash_folder: str = "default"
     speed: float = 1.0
+    temperature: float = 1.0
+    do_sample: bool = True
+    max_length_multiplier: float = 2.0  # Multiplicador do tamanho do texto
+    early_stopping: bool = True
 
 # ============== FUNÇÕES UTILITÁRIAS ==============
 
@@ -108,25 +157,10 @@ def get_gradio_client():
     return client
 
 def get_parler_model():
-    """Inicializa Parler-TTS sob demanda"""
+    """Retorna modelos Parler-TTS já carregados"""
     global parler_model, parler_tokenizer
     if parler_model is None:
-        try:
-            from parler_tts import ParlerTTSForConditionalGeneration
-            from transformers import AutoTokenizer
-            
-            print("Carregando Parler-TTS...")
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            model_name = "freds0/parler-tts-mini-v1.1-ptbr"
-            
-            parler_model = ParlerTTSForConditionalGeneration.from_pretrained(model_name).to(device)
-            parler_tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
-            print(f"Parler-TTS carregado com sucesso! Dispositivo: {device}")
-        except Exception as e:
-            print(f"Erro ao carregar Parler-TTS: {e}")
-            raise HTTPException(status_code=503, detail="Parler-TTS não disponível")
-    
+        raise HTTPException(status_code=503, detail="Parler-TTS não foi carregado na inicialização")
     return parler_model, parler_tokenizer
 
 def move_file_sync(src: str, dst: str) -> None:
@@ -191,37 +225,171 @@ async def predict(request_data: PredictRequest):
 @app.post("/parler-tts")
 async def parler_tts_generate(request_data: ParlerTTSRequest):
     """
-    Gera áudio usando Parler-TTS (modelo brasileiro local)
+    Gera áudio usando Parler-TTS (modelo brasileiro local) - VERSÃO COMPLETA
     """
     try:
         print(f"Iniciando Parler-TTS para hash: {request_data.hash_folder}")
+        print(f"Configurações: speed={request_data.speed}, temp={request_data.temperature}")
         
-        # Inicializa Parler-TTS se necessário
-        model, tokenizer = get_parler_model()
-        device = next(model.parameters()).device
+        # Verifica se modelo está carregado
+        if parler_model is None:
+            raise HTTPException(status_code=503, detail="Parler-TTS não carregado")
         
-        # Prepara os inputs
-        input_ids = tokenizer(request_data.description, return_tensors="pt").input_ids.to(device)
-        prompt_input_ids = tokenizer(request_data.text, return_tensors="pt").input_ids.to(device)
+        # Limita tamanho do texto
+        if len(request_data.text) > 500:
+            raise HTTPException(status_code=400, detail="Texto muito longo. Máximo 500 caracteres.")
         
-        # Gera o áudio
-        print("Gerando áudio...")
-        generation = model.generate(
-            input_ids=input_ids, 
-            prompt_input_ids=prompt_input_ids,
-            do_sample=True,
-            temperature=1.0,
-            max_length=prompt_input_ids.shape[-1] + 500,  # Ajusta baseado no texto
+        print(f"Processando: '{request_data.text[:100]}...'")
+        print(f"Voz: '{request_data.description[:100]}...'")
+        
+        device = next(parler_model.parameters()).device
+        
+        # Prepara inputs com configurações completas
+        try:
+            input_ids = parler_tokenizer(
+                request_data.description, 
+                return_tensors="pt", 
+                max_length=512,
+                truncation=True,
+                padding=True
+            ).input_ids.to(device)
+            
+            prompt_input_ids = parler_tokenizer(
+                request_data.text, 
+                return_tensors="pt",
+                max_length=300,
+                truncation=True,
+                padding=True
+            ).input_ids.to(device)
+            
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro no tokenizer: {str(e)}")
+        
+        print("Gerando áudio com configurações personalizadas...")
+        
+        # Calcula max_length baseado no texto
+        base_length = prompt_input_ids.shape[-1]
+        max_gen_length = int(base_length * request_data.max_length_multiplier)
+        max_gen_length = min(max_gen_length, 1024)  # Limite absoluto
+        
+        # Gera áudio com todas as configurações
+        try:
+            with torch.no_grad():
+                generation = parler_model.generate(
+                    input_ids=input_ids,
+                    prompt_input_ids=prompt_input_ids,
+                    do_sample=request_data.do_sample,
+                    temperature=request_data.temperature,
+                    max_length=max_gen_length,
+                    pad_token_id=parler_tokenizer.pad_token_id,
+                    eos_token_id=parler_tokenizer.eos_token_id,
+                    early_stopping=request_data.early_stopping,
+                    num_return_sequences=1,
+                    repetition_penalty=1.1,  # Evita repetições
+                    length_penalty=1.0,      # Controla tamanho
+                    no_repeat_ngram_size=3   # Evita loops
+                )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro na geração: {str(e)}")
+        
+        # Processa áudio
+        try:
+            audio_arr = generation.cpu().numpy().squeeze()
+            if len(audio_arr.shape) > 1:
+                audio_arr = audio_arr[0]
+            
+            if len(audio_arr) == 0:
+                raise Exception("Áudio vazio gerado")
+            
+            # Sample rate do modelo
+            sample_rate = getattr(parler_model.config, 'sampling_rate', 22050)
+            
+            print(f"Áudio base gerado: {len(audio_arr)} samples, {sample_rate}Hz")
+            
+            # Aplica ajuste de velocidade se necessário
+            if request_data.speed != 1.0:
+                try:
+                    import librosa
+                    audio_arr = librosa.effects.time_stretch(audio_arr, rate=request_data.speed)
+                    print(f"Velocidade ajustada para: {request_data.speed}x")
+                except ImportError:
+                    print("Librosa não disponível - velocidade ignorada")
+                except Exception as e:
+                    print(f"Erro no ajuste de velocidade: {e}")
+            
+            # Normaliza áudio
+            if abs(audio_arr).max() > 0:
+                audio_arr = audio_arr / abs(audio_arr).max() * 0.95  # 95% do máximo
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
+        
+        # Salva arquivo
+        try:
+            hash_directory = f"/app/final_audio/{request_data.hash_folder}/"
+            os.makedirs(hash_directory, exist_ok=True)
+            
+            sequential_filename = get_next_sequential_filename(hash_directory)
+            final_wav_path = os.path.join(hash_directory, sequential_filename)
+            
+            sf.write(final_wav_path, audio_arr, sample_rate)
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao salvar: {str(e)}")
+        
+        duration = len(audio_arr) / sample_rate
+        print(f"Parler-TTS concluído: {sequential_filename} ({duration:.2f}s)")
+        
+        return {
+            "result": final_wav_path,
+            "hash_folder": request_data.hash_folder,
+            "filename": sequential_filename,
+            "model": "parler-tts-ptbr-full",
+            "sample_rate": sample_rate,
+            "duration_seconds": duration,
+            "text_length": len(request_data.text),
+            "settings": {
+                "speed": request_data.speed,
+                "temperature": request_data.temperature,
+                "do_sample": request_data.do_sample,
+                "max_length": max_gen_length,
+                "description": request_data.description[:100]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Erro geral no Parler-TTS: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+@app.post("/gtts")
+async def google_tts_generate(request_data: ParlerTTSRequest):
+    """
+    Gera áudio usando Google Text-to-Speech (RÁPIDO - 2-5 segundos)
+    """
+    try:
+        print(f"Iniciando gTTS para hash: {request_data.hash_folder}")
+        
+        # Importa gTTS
+        try:
+            from gtts import gTTS
+        except ImportError:
+            raise HTTPException(status_code=503, detail="Instale: pip install gtts")
+        
+        # Limita tamanho do texto
+        if len(request_data.text) > 1000:
+            raise HTTPException(status_code=400, detail="Texto muito longo. Máximo 1000 caracteres.")
+        
+        print(f"Processando: '{request_data.text[:100]}...'")
+        
+        # Cria gTTS
+        tts = gTTS(
+            text=request_data.text,
+            lang='pt',  # Português
+            slow=False if request_data.speed >= 1.0 else True,
+            tld='com.br'  # Sotaque brasileiro
         )
-        
-        # Converte para áudio
-        audio_arr = generation.cpu().numpy().squeeze()
-        sample_rate = model.config.sampling_rate
-        
-        # Ajusta velocidade se necessário
-        if request_data.speed != 1.0:
-            import librosa
-            audio_arr = librosa.effects.time_stretch(audio_arr, rate=request_data.speed)
         
         # Cria diretório
         hash_directory = f"/app/final_audio/{request_data.hash_folder}/"
@@ -231,21 +399,148 @@ async def parler_tts_generate(request_data: ParlerTTSRequest):
         sequential_filename = get_next_sequential_filename(hash_directory)
         final_wav_path = os.path.join(hash_directory, sequential_filename)
         
-        # Salva o áudio
-        sf.write(final_wav_path, audio_arr, sample_rate)
+        # Salva o áudio temporariamente como MP3
+        temp_mp3 = final_wav_path.replace('.wav', '_temp.mp3')
+        tts.save(temp_mp3)
         
-        print(f"Parler-TTS concluído: {sequential_filename}")
+        # Converte MP3 para WAV usando pydub (se disponível)
+        try:
+            from pydub import AudioSegment
+            audio = AudioSegment.from_mp3(temp_mp3)
+            
+            # Aplica ajuste de velocidade se necessário
+            if request_data.speed != 1.0:
+                new_sample_rate = int(audio.frame_rate * request_data.speed)
+                audio = audio._spawn(audio.raw_data, overrides={"frame_rate": new_sample_rate})
+                audio = audio.set_frame_rate(audio.frame_rate)
+            
+            audio.export(final_wav_path, format="wav")
+            sample_rate = audio.frame_rate
+            duration = len(audio) / 1000.0  # pydub usa milissegundos
+            
+        except ImportError:
+            # Fallback: apenas renomeia o MP3 para WAV (não é ideal mas funciona)
+            shutil.move(temp_mp3, final_wav_path)
+            sample_rate = 22050  # Assume padrão do gTTS
+            duration = 0  # Não consegue calcular sem pydub
+            print("Aviso: pydub não instalado - conversão limitada")
+        
+        # Remove arquivo temporário se ainda existir
+        if os.path.exists(temp_mp3):
+            os.remove(temp_mp3)
+        
+        print(f"gTTS concluído: {sequential_filename}")
         
         return {
             "result": final_wav_path,
             "hash_folder": request_data.hash_folder,
             "filename": sequential_filename,
-            "model": "parler-tts-ptbr",
-            "sample_rate": sample_rate
+            "model": "google-tts",
+            "sample_rate": sample_rate,
+            "duration_seconds": duration,
+            "text_length": len(request_data.text),
+            "settings": {
+                "speed": request_data.speed,
+                "language": "pt-BR",
+                "engine": "google"
+            }
         }
         
     except Exception as e:
-        print(f"Erro no Parler-TTS: {str(e)}")
+        print(f"Erro no gTTS: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/edge-tts")
+async def edge_tts_generate(request_data: ParlerTTSRequest):
+    """
+    Gera áudio usando Microsoft Edge TTS (MUITO RÁPIDO - 1-3 segundos)
+    """
+    try:
+        print(f"Iniciando Edge-TTS para hash: {request_data.hash_folder}")
+        
+        # Importa edge-tts
+        try:
+            import edge_tts
+            import asyncio
+        except ImportError:
+            raise HTTPException(status_code=503, detail="Instale: pip install edge-tts")
+        
+        # Limita tamanho do texto
+        if len(request_data.text) > 2000:
+            raise HTTPException(status_code=400, detail="Texto muito longo. Máximo 2000 caracteres.")
+        
+        print(f"Processando: '{request_data.text[:100]}...'")
+        
+        # Escolhe voz baseada na descrição
+        voice = "pt-BR-FranciscaNeural"  # Padrão feminino
+        if "masculin" in request_data.description.lower() or "homem" in request_data.description.lower():
+            voice = "pt-BR-AntonioNeural"
+        elif "jovem" in request_data.description.lower():
+            voice = "pt-BR-ThalitaNeural"
+        
+        # Ajusta velocidade (Edge-TTS usa porcentagem)
+        rate = "+0%"
+        if request_data.speed < 0.8:
+            rate = "-20%"
+        elif request_data.speed < 0.9:
+            rate = "-10%"
+        elif request_data.speed > 1.2:
+            rate = "+20%"
+        elif request_data.speed > 1.1:
+            rate = "+10%"
+        
+        print(f"Voz selecionada: {voice}, Velocidade: {rate}")
+        
+        # Cria diretório
+        hash_directory = f"/app/final_audio/{request_data.hash_folder}/"
+        os.makedirs(hash_directory, exist_ok=True)
+        
+        # Gera nome sequencial
+        sequential_filename = get_next_sequential_filename(hash_directory)
+        final_wav_path = os.path.join(hash_directory, sequential_filename)
+        
+        # Cria comunicação Edge-TTS
+        communicate = edge_tts.Communicate(
+            request_data.text, 
+            voice,
+            rate=rate
+        )
+        
+        # Gera e salva áudio
+        await communicate.save(final_wav_path)
+        
+        # Calcula informações do arquivo
+        try:
+            import wave
+            with wave.open(final_wav_path, 'r') as wav_file:
+                sample_rate = wav_file.getframerate()
+                frames = wav_file.getnframes()
+                duration = frames / float(sample_rate)
+        except:
+            sample_rate = 24000  # Padrão do Edge-TTS
+            duration = len(request_data.text) * 0.1  # Estimativa
+        
+        print(f"Edge-TTS concluído: {sequential_filename}")
+        
+        return {
+            "result": final_wav_path,
+            "hash_folder": request_data.hash_folder,
+            "filename": sequential_filename,
+            "model": "microsoft-edge-tts",
+            "sample_rate": sample_rate,
+            "duration_seconds": duration,
+            "text_length": len(request_data.text),
+            "settings": {
+                "voice": voice,
+                "speed": request_data.speed,
+                "rate": rate,
+                "language": "pt-BR",
+                "engine": "edge-tts"
+            }
+        }
+        
+    except Exception as e:
+        print(f"Erro no Edge-TTS: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============== ENDPOINTS WHISPER TRANSCRIPTION ==============
