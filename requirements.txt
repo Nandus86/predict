@@ -1,16 +1,12 @@
-edge-tts
 fastapi
 gradio_client
 gtts
-librosa
 openai-whisper
-parler-tts
-psutil
 pydub
 pydantic
 python-multipart
 requests
 soundfile
 torch
-transformers
 uvicorn
+google-genai
